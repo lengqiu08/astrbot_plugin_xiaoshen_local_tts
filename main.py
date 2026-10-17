@@ -214,10 +214,9 @@ class DeepseaVoice(Star):
                 fh.write(f"file '{wav}'" + chr(10))
         gain = float(self._cfg("volume_gain", 6) or 0)
         filt = (
-            "adelay=60|60,"
-            # 开头：只削掉明显静音，另给 60ms 前导，别吞第一个字
-            "silenceremove=start_periods=1:start_duration=0.12:start_threshold=-50dB:start_silence=0.06,"
-            # 结尾：阈值同 -50dB 并保留 0.1 秒，别切到最后一个字
+            # 开头留一小段静音（0.2s）：不裁首端，让播放器和耳朵都有个缓冲，
+            # 第一个字才不会像被"掐"出来；结尾仍只削明显静音并留 0.1s。
+            "adelay=200|200,"
             "areverse,"
             "silenceremove=start_periods=1:start_duration=0.15:start_threshold=-50dB:start_silence=0.10,"
             "areverse,"
