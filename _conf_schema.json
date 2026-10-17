@@ -109,8 +109,14 @@
   },
   "timeout": {
     "description": "单条合成超时（秒）",
-    "hint": "默认 90，超时就只发文字。",
+    "hint": "默认 120，超时就只发文字；冷启动或机器忙时可以再放宽。",
     "type": "int",
-    "default": 90
+    "default": 120
+  },
+  "idle_unload_minutes": {
+    "description": "闲置多久释放模型（分钟）",
+    "hint": "默认 10。kokoro 常驻要吃 400MB，闲置到点就放掉；0 表示常驻不释放（下次开口快，但一直占内存）。",
+    "type": "int",
+    "default": 10
   }
 }

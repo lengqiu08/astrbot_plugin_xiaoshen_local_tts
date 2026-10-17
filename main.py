@@ -131,6 +131,8 @@ class DeepseaVoice(Star):
         self._ja_g2p = None
         self._lock = asyncio.Lock()
         self._warned_lang: set[str] = set()
+        self._last_use = time.time()
+        self._idle_task: asyncio.Task | None = None
 
     # ---------------- 配置 ----------------
     def _cfg(self, key, default):
@@ -289,6 +291,31 @@ class DeepseaVoice(Star):
         except OSError:
             pass
 
+    # ---------------- 空闲释放 ----------------
+    def _ensure_idle_task(self) -> None:
+        if self._idle_task is None or self._idle_task.done():
+            try:
+                self._idle_task = asyncio.create_task(self._idle_loop())
+            except RuntimeError:
+                self._idle_task = None
+
+    async def _idle_loop(self) -> None:
+        """闲置到点就把模型放掉：kokoro 常驻要 400MB，手机扛不住。"""
+        while True:
+            minutes = float(self._cfg("idle_unload_minutes", 10) or 0)
+            # 检查间隔跟着阈值走：10 分钟就每 60 秒看一次，测试用的极小值也别等一整分钟
+            await asyncio.sleep(max(10.0, min(60.0, (minutes or 10) * 30)))
+            if minutes <= 0 or self._kokoro is None:
+                continue
+            if self._lock.locked():          # 正在合成，别抽梯子
+                continue
+            if time.time() - self._last_use < minutes * 60:
+                continue
+            self._kokoro = None
+            self._zh_g2p = None
+            self._ja_g2p = None
+            logger.info(f"[DeepseaVoice] 闲置 {minutes:.0f} 分钟，模型已释放")
+
     # ---------------- 钩子 ----------------
     @filter.on_decorating_result()
     async def decorate_result(self, event: AstrMessageEvent):
@@ -315,6 +342,8 @@ class DeepseaVoice(Star):
         if len(text) > max_chars:
             text = text[:max_chars]
 
+        self._last_use = time.time()
+        self._ensure_idle_task()
         lang = detect_lang(text)
         if lang not in KOKORO_LANG:
             if lang not in self._warned_lang:
@@ -339,5 +368,8 @@ class DeepseaVoice(Star):
             result.chain = chain
 
     async def terminate(self):
+        if self._idle_task is not None:
+            self._idle_task.cancel()
+            self._idle_task = None
         self._kokoro = None
         logger.info("[DeepseaVoice] 收声。")

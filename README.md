@@ -49,7 +49,8 @@
 | `max_chars` | 300 | 原文超过就截断 |
 | `strip_brackets` | true | 去掉（尾鳍一甩）这类动作描写 |
 | `cache` | true | 同文本只合成一次，最多留 120 条 |
-| `timeout` | 90 | 单条合成超时，超时只发文字 |
+| `timeout` | 120 | 单条合成超时，超时只发文字 |
+| `idle_unload_minutes` | 10 | 闲置多久释放模型。kokoro 常驻约 400MB，默认闲置 10 分钟放掉；设 0 常驻（下次开口快，但一直占内存） |
 
 配置落盘：`data/config/astrbot_plugin_xiaoshen_local_tts_config.json`
 
