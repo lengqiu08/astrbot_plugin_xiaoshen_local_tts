@@ -1,5 +1,7 @@
 # 深海之声
 
+仓库：<https://github.com/lengqiu08/astrbot_plugin_xiaoshen_local_tts>
+
 小深的重置版语音台。只做一件事：**把 AI 的回复念成语音条，跟着文字一起发出去。**
 
 全程本地 onnx（kokoro），不连云、不花钱。
