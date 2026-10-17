@@ -89,7 +89,8 @@ def clean_text(text: str, strip_brackets: bool = True) -> str:
     text = _MARKDOWN.sub("", text)
     text = _EMOJI.sub("", text)
     text = text.translate(_CN_PUNCT)
-    return _SPACE.sub(" ", text).strip()
+    text = _SPACE.sub(" ", text).strip()
+    return text.strip("，。！？、；：,.!?;:·—… ")
 
 
 def split_sentences(text: str, chunk: int = 80, max_parts: int = 8) -> list[str]:
@@ -213,8 +214,14 @@ class DeepseaVoice(Star):
                 fh.write(f"file '{wav}'" + chr(10))
         gain = float(self._cfg("volume_gain", 6) or 0)
         filt = (
-            "silenceremove=start_periods=1:start_threshold=-45dB,"
-            "areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse,"
+            "adelay=60|60,"
+            # 开头：只削掉明显静音，另给 60ms 前导，别吞第一个字
+            "silenceremove=start_periods=1:start_duration=0.12:start_threshold=-50dB:start_silence=0.06,"
+            # 结尾：阈值同 -50dB 并保留 0.1 秒，别切到最后一个字
+            "areverse,"
+            "silenceremove=start_periods=1:start_duration=0.15:start_threshold=-50dB:start_silence=0.10,"
+            "areverse,"
+            "apad=pad_dur=0.12,"
             f"loudnorm=I=-16:TP=-1.5:LRA=11,volume={gain}dB,"
             "alimiter=limit=0.95"
         )
