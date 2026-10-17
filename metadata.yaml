@@ -1,0 +1,11 @@
+name: astrbot_plugin_xiaoshen_local_tts
+display_name: 深海之声
+desc: 小深的重置版语音台——把 AI 的回复用本地 kokoro 模型念成语音条，跟着文字一起发；多语种、可换音色、带缓存，全程离线不花一分钱。
+help: 装上就自动接管：每条 AI 文字回复后会附一条语音。中文、英文、日文、法文、西班牙文、意大利文、葡萄牙文、印地文支持；韩语等没有音色的语种会自动跳过。音色与语速在插件配置里改。
+version: 1.0.0
+author: 小深
+repo: "https://github.com/lengqiu08/astrbot_plugin_xiaoshen_local_tts"
+astrbot_version: ">=v4.12.0"
+support_platforms:
+  - aiocqhttp
+  - qq_official

@@ -1,0 +1,116 @@
+{
+  "enable": {
+    "description": "启用配音",
+    "hint": "关掉后只发文字，不合成语音。",
+    "type": "bool",
+    "default": true
+  },
+  "model_dir": {
+    "description": "kokoro 模型目录",
+    "hint": "里面要有 kokoro-v1.0.onnx 和 voices-v1.0.bin。",
+    "type": "string",
+    "default": "/root/xiaoshen_models/kokoro"
+  },
+  "voice_zh": {
+    "description": "中文音色",
+    "hint": "zf_xiaoxiao / zf_xiaobei / zf_xiaoni / zf_xiaoyi（女声），zm_yunjian / zm_yunxi / zm_yunxia / zm_yunyang（男声）。",
+    "type": "string",
+    "default": "zf_xiaoxiao"
+  },
+  "voice_en": {
+    "description": "英文音色",
+    "hint": "af_/am_ 是美音，bf_/bm_ 是英音。默认 af_heart。",
+    "type": "string",
+    "default": "af_heart"
+  },
+  "voice_ja": {
+    "description": "日语音色",
+    "hint": "jf_alpha / jf_gongitsune / jf_nezumi / jf_tebukuro / jm_kumo。",
+    "type": "string",
+    "default": "jf_alpha"
+  },
+  "voice_fr": {
+    "description": "法语音色",
+    "hint": "只有 ff_siwis 一个。",
+    "type": "string",
+    "default": "ff_siwis"
+  },
+  "voice_es": {
+    "description": "西班牙语音色",
+    "hint": "ef_dora / em_alex / em_santa。",
+    "type": "string",
+    "default": "ef_dora"
+  },
+  "voice_it": {
+    "description": "意大利语音色",
+    "hint": "if_sara / im_nicola。",
+    "type": "string",
+    "default": "if_sara"
+  },
+  "voice_pt": {
+    "description": "葡萄牙语音色",
+    "hint": "pf_dora / pm_alex / pm_santa。",
+    "type": "string",
+    "default": "pf_dora"
+  },
+  "voice_hi": {
+    "description": "印地语音色",
+    "hint": "hf_alpha / hf_beta / hm_omega / hm_psi。",
+    "type": "string",
+    "default": "hf_alpha"
+  },
+  "speed": {
+    "description": "语速",
+    "hint": "1.0 正常，1.1~1.2 略快。",
+    "type": "float",
+    "default": 1.0
+  },
+  "volume_gain": {
+    "description": "音量增益（dB）",
+    "hint": "响度归一后再加多少 dB，默认 6。太炸就调到 2~3。",
+    "type": "float",
+    "default": 6.0
+  },
+  "bitrate": {
+    "description": "输出码率",
+    "hint": "默认 96k，语音够用。",
+    "type": "string",
+    "default": "96k"
+  },
+  "chunk_chars": {
+    "description": "每段字数",
+    "hint": "长回复按句切段合成，默认 80 字一段。",
+    "type": "int",
+    "default": 80
+  },
+  "max_parts": {
+    "description": "最多合成几段",
+    "hint": "默认 8，超出的部分不念，免得合成一分钟。",
+    "type": "int",
+    "default": 8
+  },
+  "max_chars": {
+    "description": "原文上限（字）",
+    "hint": "超过就截断，默认 300。",
+    "type": "int",
+    "default": 300
+  },
+  "strip_brackets": {
+    "description": "去掉括号里的动作描写",
+    "hint": "默认开：（尾鳍一甩）这类不念出来。",
+    "type": "bool",
+    "default": true
+  },
+  "cache": {
+    "description": "合成缓存",
+    "hint": "同样的文字只合成一次，默认开。缓存最多留 120 条。",
+    "type": "bool",
+    "default": true
+  },
+  "timeout": {
+    "description": "单条合成超时（秒）",
+    "hint": "默认 90，超时就只发文字。",
+    "type": "int",
+    "default": 90
+  }
+}
