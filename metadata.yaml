@@ -9,3 +9,8 @@ astrbot_version: ">=v4.12.0"
 support_platforms:
   - aiocqhttp
   - qq_official
+tags:
+  - tts
+  - 语音
+  - kokoro
+  - offline
