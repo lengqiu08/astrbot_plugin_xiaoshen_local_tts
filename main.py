@@ -39,6 +39,11 @@ try:
 except ImportError:  # pragma: no cover
     misaki_zh = None
 
+try:
+    from misaki import ja as misaki_ja   # 日语音素，espeak 的 ja 会念成乱码
+except ImportError:  # pragma: no cover
+    misaki_ja = None
+
 RATE = 24000
 PLUGIN_NAME = "astrbot_plugin_deepsea_voice"
 
@@ -123,6 +128,7 @@ class DeepseaVoice(Star):
         os.makedirs(self.cache_dir, exist_ok=True)
         self._kokoro = None
         self._zh_g2p = None
+        self._ja_g2p = None
         self._lock = asyncio.Lock()
         self._warned_lang: set[str] = set()
 
@@ -187,6 +193,15 @@ class DeepseaVoice(Star):
                     raise RuntimeError("没装 misaki[zh]，中文没法念")
                 self._zh_g2p = misaki_zh.ZHG2P(version="1.0")
             phonemes = self._zh_g2p(text)
+            if isinstance(phonemes, tuple):
+                phonemes = phonemes[0]
+            samples, rate = kokoro.create(phonemes, voice=voice,
+                                          speed=speed or 1.0, is_phonemes=True)
+        elif lang == "ja" and misaki_ja is not None:
+            # 日语同理：espeak 的 ja 音素是坏的，走 misaki.ja（要 pyopenjtalk）
+            if self._ja_g2p is None:
+                self._ja_g2p = misaki_ja.JAG2P()
+            phonemes = self._ja_g2p(text)
             if isinstance(phonemes, tuple):
                 phonemes = phonemes[0]
             samples, rate = kokoro.create(phonemes, voice=voice,

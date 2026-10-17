@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 中文 | `zf_xiaoxiao` | 走 misaki 音素化，比 espeak 准（"游了一圈"不会被念成"居然丽已"） |
 | 英文 | `af_heart` | `bf_/bm_` 开头是英音，会自动匹配口音 |
-| 日文 | `jf_alpha` | 模型自带的日语支持较弱，效果一般 |
+| 日文 | `jf_alpha` | 走 misaki.ja（需要 pyopenjtalk），espeak 的 ja 音素会把日语念成乱码 |
 | 法文 | `ff_siwis` | 只有一个音色 |
 | 西班牙文 | `ef_dora` | |
 | 意大利文 | `if_sara` | |
