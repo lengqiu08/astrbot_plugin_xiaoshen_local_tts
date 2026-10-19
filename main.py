@@ -141,14 +141,24 @@ class DeepseaVoiceClient(Star):
         if not texts:
             return
         raw = "".join(texts)
-        # 只念日语：把带假名的部分挑出来，中文字幕不念（中文是翻译）
+        # 引用块（> 开头）和代码块里的日语不算正文，避免"引用原文"被念一遍
+        raw = "\n".join(line for line in raw.split("\n") if not line.lstrip().startswith((">", "```")))
         if not is_japanese(raw):
             return
-        jp_parts = [seg for seg in re.split(r"(?<=[。！？!?\n])", raw) if _KANA.search(seg)]
-        raw = "".join(jp_parts).strip()
-        if not raw:
+        # 假名占比太低就当成中文回复里的零星引用，不配
+        kana = len(_KANA.findall(raw))
+        if kana / max(1, len(raw)) < 0.12:
             return
+        # 拆成"日语（念）"和"中文（显示）"两部分
+        segs = re.split(r"(?<=[。！？!?\n])", raw)
+        jp_text = "".join(x for x in segs if _KANA.search(x)).strip()
+        zh_text = "".join(x for x in segs if x.strip() and not _KANA.search(x)).strip()
+        if not jp_text:
+            return
+        text = jp_text
+        raw = zh_text or jp_text
 
+        kept: list[str] = []
         limit = int(self._cfg("max_chars", 300) or 300)
         text = raw.strip()[: limit * 2]          # 先粗截，防止一条消息读五分钟
         pieces = split_chunks(text, min(limit, 200))
@@ -160,7 +170,12 @@ class DeepseaVoiceClient(Star):
                 logger.warning(f"[DeepseaVoiceClient] 调服务失败：{exc}")
                 continue
             if path and os.path.exists(path):
-                # silk 走不通（腾讯协议直接 DEC_PAYLOAD_TOO_LARGE），退回 mp3
-                chain.append(Record(file=path, text=piece))
-        if len(chain) > 1:
+                kept.append(path)
+        if kept:
+            # 语音在前，中文翻译在后
+            plain_idx = next((i for i, c in enumerate(chain) if isinstance(c, Plain)), None)
+            if plain_idx is not None:
+                chain[plain_idx].text = raw
+            for path in reversed(kept):
+                chain.insert(0, Record(file=path))
             result.chain = chain
