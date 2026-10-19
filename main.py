@@ -29,6 +29,28 @@ def is_japanese(text: str) -> bool:
     return bool(_KANA.search(text or ""))
 
 
+def split_chunks(text: str, limit: int = 200) -> list[str]:
+    """按句号切块，每块不超过 limit 字——QQ 一条语音最多 60 秒，长回复得拆开发。"""
+    sents = re.split(r"(?<=[。！？.!?])", text)
+    chunks: list[str] = []
+    cur = ""
+    for sent in sents:
+        if not sent:
+            continue
+        if cur and len(cur) + len(sent) > limit:
+            chunks.append(cur)
+            cur = sent
+        else:
+            cur += sent
+    if cur:
+        chunks.append(cur)
+    # 最后一块太短就并回前一块，免得甩出一条一两秒的碎语音
+    if len(chunks) > 1 and len(chunks[-1]) < 50:
+        chunks[-2] += chunks[-1]
+        chunks.pop()
+    return chunks
+
+
 class DeepseaVoiceClient(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
@@ -91,13 +113,17 @@ class DeepseaVoiceClient(Star):
         if not is_japanese(raw) and not bool(self._cfg("chinese_too", True)):
             return
 
-        text = raw.strip()[: int(self._cfg("max_chars", 200) or 200)]
-        try:
-            import asyncio
-            path = await asyncio.to_thread(self._ask_service, text)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[DeepseaVoiceClient] 调服务失败：{exc}")
-            return
-        if path and os.path.exists(path):
-            chain.append(Record(file=path, text=text))
+        limit = int(self._cfg("max_chars", 300) or 300)
+        text = raw.strip()[: limit * 2]          # 先粗截，防止一条消息读五分钟
+        pieces = split_chunks(text, min(limit, 200))
+        import asyncio
+        for piece in pieces:
+            try:
+                path = await asyncio.to_thread(self._ask_service, piece)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[DeepseaVoiceClient] 调服务失败：{exc}")
+                continue
+            if path and os.path.exists(path):
+                chain.append(Record(file=path, text=piece))
+        if len(chain) > 1:
             result.chain = chain
