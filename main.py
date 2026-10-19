@@ -11,9 +11,12 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
+import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -67,6 +70,47 @@ class DeepseaVoiceClient(Star):
         self.plugin_dir = os.path.dirname(os.path.abspath(__file__))
         self.cache_dir = os.path.join(self.plugin_dir, "cache")
         os.makedirs(self.cache_dir, exist_ok=True)
+        # 翻译服务跟着插件走：进程不在就拉起来（线程里做，别卡住加载）
+        try:
+            import threading
+            threading.Thread(target=self._ensure_translate_service, daemon=True).start()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _port_open(self, host: str, port: int) -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except OSError:
+            return False
+
+    def _ensure_translate_service(self) -> None:
+        """翻译服务不在就拉起来——跟着 AstrBot 一起活，重启不会掉。"""
+        url = str(self._cfg("translate_url", "http://127.0.0.1:8891/translate") or "")
+        if "8891" not in url:
+            return
+        if self._port_open("127.0.0.1", 8891):
+            return
+        base = os.path.abspath(os.path.join(self.plugin_dir, "..", "..", "translate"))
+        entry = os.path.join(base, "server.mjs")
+        if not os.path.exists(entry):
+            logger.warning(f"[DeepseaVoiceClient] 找不到翻译服务：{entry}")
+            return
+        node = shutil.which("node")
+        if not node:
+            logger.warning("[DeepseaVoiceClient] 没装 node，翻译服务起不来")
+            return
+        env = dict(os.environ, TRANSLATE_HOST="127.0.0.1", TRANSLATE_PORT="8891")
+        try:
+            subprocess.Popen(
+                [node, "--max-old-space-size=1536", entry],
+                cwd=base, env=env,
+                stdout=open("/tmp/translate.log", "a"),
+                stderr=subprocess.STDOUT,
+                start_new_session=True)
+            logger.info("[DeepseaVoiceClient] 翻译服务已拉起（后台加载模型）")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[DeepseaVoiceClient] 翻译服务启动失败：{exc}")
 
     def _cfg(self, key, default):
         value = self.config.get(key, default)
@@ -112,6 +156,28 @@ class DeepseaVoiceClient(Star):
             except OSError:
                 pass
 
+    # 说话习惯：翻译前先把自称换成日语的第一人称，免得"本鲸"被译成兔子
+    _SPEAK_FIX = (("本鲸", "私"), ("小深", "小深"))
+
+    def _translate(self, text: str) -> str:
+        """中文 → 日语。走本地 m2m100 服务（127.0.0.1:8891）。"""
+        url = str(self._cfg("translate_url", "http://127.0.0.1:8891/translate"))
+        if not url:
+            return ""
+        src = text
+        for a, b in self._SPEAK_FIX:
+            src = src.replace(a, b)
+        payload = json.dumps({"text": src[:400]}, ensure_ascii=False).encode()
+        req = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=float(self._cfg("translate_timeout", 90))) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[DeepseaVoiceClient] 翻译失败：{exc}")
+            return ""
+        return str(data.get("ja") or "").strip()
+
     def _clean_cache(self, keep: int = 60) -> None:
         try:
             files = [os.path.join(self.cache_dir, f) for f in os.listdir(self.cache_dir)]
@@ -141,28 +207,31 @@ class DeepseaVoiceClient(Star):
         if not texts:
             return
         raw = "".join(texts)
-        # 引用块（> 开头）和代码块里的日语不算正文，避免"引用原文"被念一遍
         raw = "\n".join(line for line in raw.split("\n") if not line.lstrip().startswith((">", "```")))
-        if not is_japanese(raw):
+        if not raw.strip():
             return
-        # 假名占比太低就当成中文回复里的零星引用，不配
-        kana = len(_KANA.findall(raw))
-        if kana / max(1, len(raw)) < 0.12:
-            return
-        # 拆成"日语（念）"和"中文（显示）"两部分
-        segs = re.split(r"(?<=[。！？!?\n])", raw)
-        jp_text = "".join(x for x in segs if _KANA.search(x)).strip()
-        zh_text = "".join(x for x in segs if x.strip() and not _KANA.search(x)).strip()
+
+        # 日语原文直接念；纯中文先送去翻译服务，拿回日语再念
+        jp_text = ""
+        zh_text = raw
+        if is_japanese(raw):
+            segs = re.split(r"(?<=[。！？!?\n])", raw)
+            jp_text = "".join(x for x in segs if _KANA.search(x)).strip()
+            zh_text = "".join(x for x in segs if x.strip() and not _KANA.search(x)).strip() or raw
+        else:
+            translated = await asyncio.to_thread(self._translate, raw)
+            jp_text = translated or ""
+
         if not jp_text:
             return
         text = jp_text
-        raw = zh_text or jp_text
+        raw = zh_text
 
         kept: list[str] = []
         limit = int(self._cfg("max_chars", 300) or 300)
-        text = raw.strip()[: limit * 2]          # 先粗截，防止一条消息读五分钟
-        pieces = split_chunks(text, min(limit, 200))
-        import asyncio
+        # 念的是日语（翻译结果），显示的是中文原文——别搞反
+        voice_text = text.strip()[: limit * 2]
+        pieces = split_chunks(voice_text, min(limit, 200))
         for piece in pieces:
             try:
                 path = await asyncio.to_thread(self._ask_service, piece)

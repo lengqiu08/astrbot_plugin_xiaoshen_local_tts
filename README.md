@@ -1,60 +1,65 @@
 # 深海之声
 
-只有 AI 回复是**日语**（或按配置的中文）时，才附一条本地合成的语音条。
-
-插件很薄：**自己不加载任何模型**，只把文本 POST 给本地语音服务，拿回 mp3 挂到消息链上。
-所以它不会吃内存，也不会有"缺模型"这类报错。
+语音条由本地两个服务合作产出：**翻译**（中文 → 日语）+ **合成**（日语 → 语音）。
+插件本身很薄，只做调度和拼接。
 
 - 插件目录：`data/plugins/astrbot_plugin_xiaoshen_local_tts/`
-- 语音服务：`data/tts_service/`（VOICEVOX，见那边的 README）
-- 版本：0.0.1（测试版）
+- 翻译服务：`data/translate/server.mjs`（Node + transformers.js + m2m100_418M）
+- 语音服务：`data/tts_service/server.py`（Python + VOICEVOX CORE）
+- 版本：0.1.0
 
-## 单一出口
-
-语音只由插件生成，**助手不手动发语音**。
-
-回复写成"日语 + 中文翻译"两段：
+## 链路
 
 ```
-おはよう。よく眠れた？
-早安，睡得好吗？
+AI 回复（中文）
+   ↓
+插件：取正文，剔掉引用块 / 代码块
+   ↓
+翻译服务 :8891  中文 → 日语
+   ↓
+语音服务 :8890  日语 → mp3
+   ↓
+消息链：[语音] + [中文原文]
 ```
 
-插件会：日语那段合成成语音 → 插到消息最前面 → 文字只保留中文。
+## 生命周期
 
-结果就是「语音在前、中文在后」的一条消息，不会重复。
+翻译服务**由插件拉起**：加载插件时先探 8891 端口，没人就用 `node server.mjs` 起一个。
+AstrBot 重启 → 插件重载 → 服务自动回来，不用手动敲命令。
 
-## 工作方式
-
-```
-AI 回复 → on_decorating_result
-        → 判断是不是日语（有假名）
-        → POST http://127.0.0.1:8890/tts
-        → 拿到 mp3 → 追加 Record → 一起发出
-```
+语音服务（8890）仍需要自己常驻，或用 `data/tts_service/start.sh`。
 
 ## 配置
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `enable` | true | 总开关 |
-| `service_url` | `http://127.0.0.1:8890/tts` | 语音服务地址 |
-| `max_chars` | 300 | 单条上限（约 75 秒语音），超了截断 |
-| `timeout` | 120 | 请求超时（秒）。超过 120 秒当超时处理，只发文字 |
-| `chinese_too` | true | 中文也用日语引擎念（汉字音读，日式中文） |
+| `service_url` | `http://127.0.0.1:8890/tts` | 语音合成服务 |
+| `translate_url` | `http://127.0.0.1:8891/translate` | 翻译服务；填空则不翻译，只对日语原文配音 |
+| `translate_timeout` | 90 | 翻译超时（第一次加载模型慢） |
+| `max_chars` | 300 | 单条上限（约 75 秒语音） |
+| `timeout` | 120 | 合成超时 |
+| `chinese_too` | false | 兼容旧行为，现在中文统一走翻译 |
 
-## 依赖
+## 说话习惯
 
-- 本地语音服务跑起来：`cd data/tts_service && python server.py`
-- 无需任何云服务、API key
+翻译前会把「本鲸」替换成「私」，否则 m2m100 会把它译成 **ウサギ（兔子）**。
+映射表在 `main.py` 的 `_SPEAK_FIX`。
 
 ## 排错
 
 ```bash
-curl http://127.0.0.1:8890/health      # 服务活着吗
-grep DeepseaVoiceClient data/logs/astrbot.log | tail -10
+curl http://127.0.0.1:8891/health   # 翻译服务
+curl http://127.0.0.1:8890/health   # 语音服务
+
+grep -E "翻译失败|调服务失败" data/logs/astrbot.log | tail
+tail -5 /tmp/translate.log
+tail -5 /tmp/tts_service.log
 ```
 
-- **没有语音**：先看 `/health`，再看插件是不是被 `plugin_set` 白名单挡了
-- **中文也念**：`chinese_too` 关掉就只对日语配音
-- **声音断断续续**：问题在服务那边（停顿参数），不在插件
+常见现象：
+
+- **没有语音**：先看两个 `/health`，再看插件是否在白名单
+- **文字变成「是。」之类**：变量串了（历史 bug，已修：念日语、显示中文）
+- **翻译超时**：第一次加载要 20 秒左右，`translate_timeout` 别设太小
+- **服务莫名消失**：运存不够被系统杀，`node --max-old-space-size` 别低于 1024

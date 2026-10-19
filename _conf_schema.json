@@ -28,5 +28,17 @@
     "hint": "开：中文回复配上日语嗓音（汉字音读，日式中文）。关：只有日语才配音。",
     "type": "bool",
     "default": false
+  },
+  "translate_url": {
+    "description": "翻译服务地址",
+    "hint": "中文先送去这里翻成日语，再合成语音。填空则不翻译。",
+    "type": "string",
+    "default": "http://127.0.0.1:8891/translate"
+  },
+  "translate_timeout": {
+    "description": "翻译超时（秒）",
+    "hint": "默认 90。第一次加载模型会慢。",
+    "type": "int",
+    "default": 90
   }
 }
