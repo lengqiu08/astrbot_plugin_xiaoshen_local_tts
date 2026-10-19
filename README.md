@@ -24,8 +24,8 @@ AI 回复 → on_decorating_result
 | --- | --- | --- |
 | `enable` | true | 总开关 |
 | `service_url` | `http://127.0.0.1:8890/tts` | 语音服务地址 |
-| `max_chars` | 200 | 单条上限，超了截断 |
-| `timeout` | 60 | 请求超时（秒） |
+| `max_chars` | 300 | 单条上限（约 75 秒语音），超了截断 |
+| `timeout` | 120 | 请求超时（秒）。超过 120 秒当超时处理，只发文字 |
 | `chinese_too` | true | 中文也用日语引擎念（汉字音读，日式中文） |
 
 ## 依赖

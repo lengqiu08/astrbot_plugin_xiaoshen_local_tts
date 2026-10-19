@@ -19,9 +19,9 @@
   },
   "timeout": {
     "description": "请求超时（秒）",
-    "hint": "默认 60。",
+    "hint": "默认 120 秒，超过就当超时，只发文字。",
     "type": "int",
-    "default": 60
+    "default": 120
   },
   "chinese_too": {
     "description": "中文也用日语引擎念",
