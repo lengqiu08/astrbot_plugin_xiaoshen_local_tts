@@ -1,0 +1,32 @@
+{
+  "enable": {
+    "description": "启用配音",
+    "hint": "关掉后只发文字。",
+    "type": "bool",
+    "default": true
+  },
+  "service_url": {
+    "description": "TTS 服务地址",
+    "hint": "默认 http://127.0.0.1:8890/tts，对应 data/tts_service/server.py。",
+    "type": "string",
+    "default": "http://127.0.0.1:8890/tts"
+  },
+  "max_chars": {
+    "description": "单条上限（字）",
+    "hint": "超过就截断，默认 200。",
+    "type": "int",
+    "default": 200
+  },
+  "timeout": {
+    "description": "请求超时（秒）",
+    "hint": "默认 60。",
+    "type": "int",
+    "default": 60
+  },
+  "chinese_too": {
+    "description": "中文也用日语引擎念",
+    "hint": "开：中文回复配上日语嗓音（汉字音读，日式中文）。关：只有日语才配音。",
+    "type": "bool",
+    "default": true
+  }
+}

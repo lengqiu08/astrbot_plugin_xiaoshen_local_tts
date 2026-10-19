@@ -1,0 +1,15 @@
+name: astrbot_plugin_xiaoshen_local_tts
+display_name: 深海之声
+desc: 只有 AI 用日语回复时才配音；本插件不加载模型，只把文本交给本地 TTS 服务（127.0.0.1:8890），拿回语音条。
+help: 装上就自动接管日语回复。合成在独立服务里跑，改音色/换模型不用动插件。中文等只发文字。
+version: 0.0.1
+author: 小深
+astrbot_version: ">=v4.12.0"
+support_platforms:
+  - aiocqhttp
+  - qq_official
+tags:
+  - tts
+  - 语音
+  - 日语
+  - voicevox
