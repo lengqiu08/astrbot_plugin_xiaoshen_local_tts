@@ -18,6 +18,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -74,6 +75,7 @@ class DeepseaVoiceClient(Star):
         try:
             import threading
             threading.Thread(target=self._ensure_translate_service, daemon=True).start()
+            threading.Thread(target=self._ensure_tts_service, daemon=True).start()
         except Exception:  # noqa: BLE001
             pass
 
@@ -83,6 +85,32 @@ class DeepseaVoiceClient(Star):
                 return True
         except OSError:
             return False
+
+    def _ensure_tts_service(self) -> None:
+        """VOICEVOX 语音服务不在就拉起来（Python 进程）。"""
+        url = str(self._cfg("service_url", "http://127.0.0.1:8890/tts") or "")
+        if "8890" not in url or self._port_open("127.0.0.1", 8890):
+            return
+        script = os.path.abspath(os.path.join(self.plugin_dir, "..", "..", "tts_service", "server.py"))
+        if not os.path.exists(script):
+            logger.warning(f"[DeepseaVoiceClient] 找不到语音服务：{script}")
+            return
+        env = dict(os.environ,
+                   TTS_HOST="127.0.0.1",
+                   VOICEVOX_DIR=str(self._cfg("voicevox_dir", "/root/AstrBot/data/voicevox")),
+                   VOICEVOX_MODEL=str(self._cfg("voicevox_model", "0.vvm")),
+                   VOICEVOX_STYLE=str(self._cfg("voicevox_style", 3)),
+                   TTS_GAP="0.04")
+        try:
+            subprocess.Popen(
+                [sys.executable, script],
+                cwd=os.path.dirname(script), env=env,
+                stdout=open("/tmp/tts_service.log", "a"),
+                stderr=subprocess.STDOUT,
+                start_new_session=True)
+            logger.info("[DeepseaVoiceClient] 语音服务已拉起")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[DeepseaVoiceClient] 语音服务启动失败：{exc}")
 
     def _ensure_translate_service(self) -> None:
         """翻译服务不在就拉起来——跟着 AstrBot 一起活，重启不会掉。"""
