@@ -13,9 +13,9 @@
   },
   "max_chars": {
     "description": "单条上限（字）",
-    "hint": "超过就截断，默认 200。",
+    "hint": "单条上限，默认 300 字（约 75 秒语音）。太长没人听完。",
     "type": "int",
-    "default": 200
+    "default": 300
   },
   "timeout": {
     "description": "请求超时（秒）",
