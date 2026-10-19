@@ -14,8 +14,17 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import tempfile
 import time
 import urllib.request
+
+try:
+    import pilk          # silk 编码：QQ 语音条原生格式，比 mp3 更稳
+except ImportError:  # pragma: no cover
+    pilk = None
+
+SILK_RATE = 24000
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -80,6 +89,29 @@ class DeepseaVoiceClient(Star):
         self._clean_cache()
         return out
 
+    @staticmethod
+    def _to_silk(mp3: str) -> str:
+        """转成 QQ 语音条的原生格式，参考点歌插件那套做法。"""
+        if pilk is None:
+            return mp3
+        pcm = os.path.join(tempfile.gettempdir(), f"tts_{os.getpid()}_{os.urandom(3).hex()}.pcm")
+        silk = pcm.replace(".pcm", ".silk")
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", mp3,
+                 "-f", "s16le", "-ar", str(SILK_RATE), "-ac", "1", pcm],
+                check=True, timeout=300)
+            if not pilk.encode(pcm, silk, SILK_RATE):
+                return mp3
+            return silk
+        except Exception:  # noqa: BLE001
+            return mp3
+        finally:
+            try:
+                os.remove(pcm)
+            except OSError:
+                pass
+
     def _clean_cache(self, keep: int = 60) -> None:
         try:
             files = [os.path.join(self.cache_dir, f) for f in os.listdir(self.cache_dir)]
@@ -109,8 +141,12 @@ class DeepseaVoiceClient(Star):
         if not texts:
             return
         raw = "".join(texts)
-        # 中文也配音：交给日语引擎按汉字音读，出来就是"日式中文"
-        if not is_japanese(raw) and not bool(self._cfg("chinese_too", True)):
+        # 只念日语：把带假名的部分挑出来，中文字幕不念（中文是翻译）
+        if not is_japanese(raw):
+            return
+        jp_parts = [seg for seg in re.split(r"(?<=[。！？!?\n])", raw) if _KANA.search(seg)]
+        raw = "".join(jp_parts).strip()
+        if not raw:
             return
 
         limit = int(self._cfg("max_chars", 300) or 300)
@@ -124,6 +160,7 @@ class DeepseaVoiceClient(Star):
                 logger.warning(f"[DeepseaVoiceClient] 调服务失败：{exc}")
                 continue
             if path and os.path.exists(path):
+                # silk 走不通（腾讯协议直接 DEC_PAYLOAD_TOO_LARGE），退回 mp3
                 chain.append(Record(file=path, text=piece))
         if len(chain) > 1:
             result.chain = chain

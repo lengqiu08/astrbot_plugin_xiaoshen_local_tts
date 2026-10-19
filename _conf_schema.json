@@ -27,6 +27,6 @@
     "description": "中文也用日语引擎念",
     "hint": "开：中文回复配上日语嗓音（汉字音读，日式中文）。关：只有日语才配音。",
     "type": "bool",
-    "default": true
+    "default": false
   }
 }
