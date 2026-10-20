@@ -94,5 +94,15 @@
     "hint": "响度归一后再加多少，默认 +2。别超过 +4。",
     "type": "float",
     "default": 1.0
+  },
+  "output_format": {
+    "description": "输出格式",
+    "hint": "mp3 = 兼容语音条（默认）；flac = 无损，但 QQ 可能不认作语音条。",
+    "type": "string",
+    "default": "mp3",
+    "options": [
+      "mp3",
+      "flac"
+    ]
   }
 }

@@ -1,8 +1,8 @@
 name: astrbot_plugin_xiaoshen_local_tts
 display_name: 深海之声
-desc: 一体化语音插件——把回复里的日语用本地 VOICEVOX 念成语音条，中文留在文字里；不依赖外部服务，插件自己加载模型。
+desc: 一体化语音插件——回复里的日语用本地 VOICEVOX 合成（默认 FLAC 无损），中文留在文字里；自带音色菜单与试听。
 help: 回复写成「日语 + 中文」两段即可：日语合成语音，中文显示。模型随插件加载，闲置自动释放。
-version: 2.0.0
+version: 2.1.0
 author: 小深
 astrbot_version: ">=v4.12.0"
 support_platforms:

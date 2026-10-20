@@ -114,14 +114,18 @@ class DeepseaVoice(Star):
     def _synthesize(self, text: str) -> str:
         """日语 → mp3 路径。按句子切分，自己插静音。"""
         style = int(self._cfg("voicevox_style", 3))
-        key = hashlib.sha1(f"{text}|{style}".encode()).hexdigest()[:16]
-        out = os.path.join(self.cache_dir, f"{key}.mp3")
+        fmt = str(self._cfg("output_format", "mp3")).lower()
+        key = hashlib.sha1(f"{text}|{style}|{fmt}".encode()).hexdigest()[:16]
+        out = os.path.join(self.cache_dir, f"{key}.{fmt}")
         if bool(self._cfg("cache", True)) and os.path.exists(out):
             return out
 
         self._load_model()
         e = self._engine()
-        segs = [x for x in SENT_SPLIT.split(text) if x.strip()] or [text]
+        # 合成前清一遍：括号里的动作/英文缩写、拉丁字母，都别念
+        clean = re.sub(r"[（(\[【][^）)\]】]{0,40}[）)\]】]", "", text)
+        clean = re.sub(r"\s+", "", clean).strip()
+        segs = [x for x in SENT_SPLIT.split(clean) if x.strip()] or [clean or text]
 
         chunks: list[tuple[bytes, float]] = []
         for seg in segs:
@@ -168,6 +172,9 @@ class DeepseaVoice(Star):
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise RuntimeError("缺 ffmpeg")
+        fmt = str(self._cfg("output_format", "mp3")).lower()
+        if fmt == "flac" and out.endswith(".mp3"):
+            out = out[:-4] + ".flac"
         src = os.path.join(tempfile.gettempdir(), f"dsv_{os.getpid()}_{os.urandom(3).hex()}.wav")
         with open(src, "wb") as fh:
             fh.write(wav_bytes)
@@ -175,8 +182,10 @@ class DeepseaVoice(Star):
             subprocess.run(
                 [ffmpeg, "-y", "-loglevel", "error", "-i", src,
                  "-af", f"loudnorm=I={self._cfg('loudness', -14)}:TP=-1:LRA=11,volume={self._cfg('volume_gain', 2)}dB,alimiter=limit=0.97",
-                 "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame",
-                 "-b:a", str(self._cfg("bitrate", "160k")), out],
+                 "-ar", "24000", "-ac", "1",
+                 *(["-c:a", "flac", "-compression_level", "8"] if fmt == "flac"
+                   else ["-c:a", "libmp3lame", "-b:a", str(self._cfg("bitrate", "160k"))]),
+                 out],
                 check=True, timeout=180)
         finally:
             try:
@@ -331,8 +340,10 @@ class DeepseaVoice(Star):
         if paths:
             if zh:
                 plain.text = zh
+            # 插在文字前面，别插到 chain[0]——私信里开头可能是 Reply，插错位置会丢语音
+            idx = chain.index(plain)
             for path in reversed(paths):
-                chain.insert(0, Record(file=path))
+                chain.insert(idx, Record(file=path))
             result.chain = chain
 
 
