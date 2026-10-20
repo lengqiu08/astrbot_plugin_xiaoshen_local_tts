@@ -1,13 +1,98 @@
 {
-  "enable": {"description":"启用配音","hint":"关掉后只发文字。","type":"bool","default":true},
-  "voicevox_dir": {"description":"VOICEVOX 资源目录","hint":"models/vvms、dict、onnxruntime 所在目录。","type":"string","default":"/root/AstrBot/data/voicevox"},
-  "voicevox_model": {"description":"模型文件","hint":"0.vvm = 四国めたん/ずんだもん/春日部つむぎ/雨晴はう。","type":"string","default":"0.vvm"},
-  "voicevox_style": {"description":"声线 ID","hint":"ずんだもん ノーマル = 3，春日部つむぎ = 8。","type":"int","default":3},
-  "speed": {"description":"语速","hint":"默认 1.05。","type":"float","default":1.05},
-  "intonation": {"description":"语调起伏","hint":"默认 1.0，喜欢更活泼调到 1.2。","type":"float","default":1.0},
-  "bitrate": {"description":"输出码率","hint":"默认 96k。","type":"string","default":"96k"},
-  "cache": {"description":"合成缓存","hint":"同文本只合成一次，最多留 80 条。","type":"bool","default":true},
-  "guard_memory_mb": {"description":"运存保护（MB）","hint":"可用运存低于此值跳过配音，默认 200。","type":"int","default":200},
-  "idle_unload_minutes": {"description":"闲置释放（分钟）","hint":"默认 15，闲置到点放掉模型省运存。0 不释放。","type":"int","default":15},
-  "timeout": {"description":"合成超时（秒）","hint":"默认 120。","type":"int","default":120}
+  "enable": {
+    "description": "启用配音",
+    "hint": "关掉后只发文字。",
+    "type": "bool",
+    "default": true
+  },
+  "voicevox_dir": {
+    "description": "VOICEVOX 资源目录",
+    "hint": "models/vvms、dict、onnxruntime 所在目录。",
+    "type": "string",
+    "default": "/root/AstrBot/data/voicevox"
+  },
+  "voicevox_model": {
+    "description": "模型文件",
+    "hint": "0.vvm = 四国めたん / ずんだもん / 春日部つむぎ / 雨晴はう；1.vvm = 冥鳴ひまり；2.vvm = 九州そら",
+    "type": "string",
+    "default": "0.vvm"
+  },
+  "voicevox_style": {
+    "description": "声线编号（括号里是角色与语气）",
+    "hint": "3 = ずんだもん・ノーマル（默认）｜1 = ずんだもん・あまあま｜5 = ずんだもん・セクシー｜7 = ずんだもん・ツンツン｜2 = 四国めたん・ノーマル｜0 = 四国めたん・あまあま｜4 = 四国めたん・セクシー｜6 = 四国めたん・ツンツン｜8 = 春日部つむぎ｜10 = 雨晴はう｜14 = 冥鳴ひまり（需 1.vvm）｜16 = 九州そら（需 2.vvm）",
+    "type": "int",
+    "default": 3
+  },
+  "speed": {
+    "description": "语速",
+    "hint": "默认 1.05。",
+    "type": "float",
+    "default": 1.05
+  },
+  "intonation": {
+    "description": "语调起伏",
+    "hint": "默认 1.0，喜欢更活泼调到 1.2。",
+    "type": "float",
+    "default": 1.0
+  },
+  "bitrate": {
+    "description": "输出码率",
+    "hint": "默认 160k（更清晰）；嫌大就调回 96k。",
+    "type": "string",
+    "default": "160k"
+  },
+  "cache": {
+    "description": "合成缓存",
+    "hint": "同文本只合成一次，最多留 80 条。",
+    "type": "bool",
+    "default": true
+  },
+  "guard_memory_mb": {
+    "description": "运存保护（MB）",
+    "hint": "可用运存低于此值跳过配音，默认 200。",
+    "type": "int",
+    "default": 200
+  },
+  "idle_unload_minutes": {
+    "description": "闲置释放（分钟）",
+    "hint": "默认 15，闲置到点放掉模型省运存。0 不释放。",
+    "type": "int",
+    "default": 15
+  },
+  "timeout": {
+    "description": "合成超时（秒）",
+    "hint": "默认 120。",
+    "type": "int",
+    "default": 120
+  },
+  "auto_translate": {
+    "description": "没写日语时自动翻译",
+    "hint": "开：回复里没日语，就用 AstrBot 的模型翻一句再配音，保证每条都有声音。关：只念手写的日语。",
+    "type": "bool",
+    "default": true
+  },
+  "translate_timeout": {
+    "description": "翻译超时（秒）",
+    "hint": "调模型翻译的等待时间，默认 45。",
+    "type": "int",
+    "default": 45
+  },
+  "chunk_chars": {
+    "description": "每条语音字数上限",
+    "hint": "默认 180（约 50 秒）。超了就拆成多条语音发，避免 QQ 截断。",
+    "type": "int",
+    "default": 180
+  },
+  "loudness": {
+    "description": "响度标准（LUFS）",
+    "hint": "数字越小越响。默认 -14，-12 更响但可能爆。",
+    "type": "int",
+    "default": -15
+  },
+  "volume_gain": {
+    "description": "额外增益（dB）",
+    "hint": "响度归一后再加多少，默认 +2。别超过 +4。",
+    "type": "float",
+    "default": 1.0
+  }
 }

@@ -37,6 +37,25 @@ SENT_SPLIT = re.compile(r"(?<=[。！？!?])")
 GAP = {"。": 0.04, ".": 0.04, "？": 0.03, "?": 0.03, "！": 0.03, "!": 0.03, "；": 0.03, ";": 0.03}
 
 
+def split_by_len(text: str, limit: int = 180) -> list[str]:
+    """按句切块，每块不超过 limit 字——QQ 一条语音最多 60 秒，长回复得拆开。"""
+    sents = [x for x in re.split(r"(?<=[。！？!?])", text) if x.strip()]
+    out: list[str] = []
+    cur = ""
+    for sent in sents:
+        if cur and len(cur) + len(sent) > limit:
+            out.append(cur)
+            cur = sent
+        else:
+            cur += sent
+    if cur:
+        out.append(cur)
+    if len(out) > 1 and len(out[-1]) < 40:
+        out[-2] += out[-1]
+        out.pop()
+    return out or [text]
+
+
 def has_kana(text: str) -> bool:
     return bool(KANA.search(text or ""))
 
@@ -155,9 +174,9 @@ class DeepseaVoice(Star):
         try:
             subprocess.run(
                 [ffmpeg, "-y", "-loglevel", "error", "-i", src,
-                 "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,volume=0dB,alimiter=limit=0.95",
+                 "-af", f"loudnorm=I={self._cfg('loudness', -14)}:TP=-1:LRA=11,volume={self._cfg('volume_gain', 2)}dB,alimiter=limit=0.97",
                  "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame",
-                 "-b:a", str(self._cfg("bitrate", "96k")), out],
+                 "-b:a", str(self._cfg("bitrate", "160k")), out],
                 check=True, timeout=180)
         finally:
             try:
@@ -200,6 +219,60 @@ class DeepseaVoice(Star):
             logger.info(f"[深海之声] 闲置 {minutes:.0f} 分钟，释放模型")
 
     # ---------------- 钩子 ----------------
+    VOICES = [
+        (3, "ずんだもん・ノーマル", "标准，默认"),
+        (1, "ずんだもん・あまあま", "偏甜"),
+        (5, "ずんだもん・セクシー", "偏低"),
+        (7, "ずんだもん・ツンツン", "偏冷"),
+        (2, "四国めたん・ノーマル", "标准"),
+        (0, "四国めたん・あまあま", "偏甜"),
+        (4, "四国めたん・セクシー", "偏成熟"),
+        (6, "四国めたん・ツンツン", "偏冷"),
+        (8, "春日部つむぎ", "清亮"),
+        (10, "雨晴はう", "温柔偏低"),
+    ]
+
+    def _menu_text(self) -> str:
+        cur = int(self._cfg("voicevox_style", 3))
+        lines = ["🎙 可用音色（发「试听 编号」可听）", ""]
+        for sid, name, note in self.VOICES:
+            mark = " ← 当前" if sid == cur else ""
+            lines.append(f"{sid:>2} · {name}（{note}）{mark}")
+        lines.append("")
+        lines.append("换音色：WebUI → 插件配置 → 声线编号")
+        return "\n".join(lines)
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def on_message(self, event: AstrMessageEvent):
+        text = (event.message_str or "").strip()
+        if text in ("音色", "语音菜单", "音色列表", "voice"):
+            yield event.plain_result(self._menu_text())
+            event.stop_event()
+            return
+        if text.startswith("试听"):
+            arg = text[2:].strip()
+            if not arg.isdigit():
+                yield event.plain_result("格式：试听 3（编号见「音色」）")
+                event.stop_event()
+                return
+            style = int(arg)
+            snippet = "これは声の試聴だよ。どうかな？"
+            old = self.config.get("voicevox_style")
+            self.config["voicevox_style"] = style
+            try:
+                path = await asyncio.to_thread(self._synthesize, snippet)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[深海之声] 试听失败：{exc}")
+                self.config["voicevox_style"] = old
+                yield event.plain_result(f"试听失败：{exc}")
+                event.stop_event()
+                return
+            self.config["voicevox_style"] = old
+            yield event.plain_result(f"试听 · 编号 {style}")
+            yield event.chain_result([Record(file=path)])
+            event.stop_event()
+            return
+
     @filter.on_decorating_result()
     async def decorate(self, event: AstrMessageEvent):
         if not bool(self._cfg("enable", True)) or not self._ready():
@@ -222,7 +295,12 @@ class DeepseaVoice(Star):
         jp = "".join(x for x in segs if has_kana(x)).strip()
         zh = "".join(x for x in segs if not has_kana(x)).strip()
         if not jp:
-            return                      # 没有日语，就只发文字
+            # 回复里没写日语，就让模型翻一句，保证每条都有声音
+            if not bool(self._cfg("auto_translate", True)):
+                return
+            jp = await self._llm_translate(zh or raw)
+            if not jp:
+                return
 
         guard = int(self._cfg("guard_memory_mb", 200) or 0)
         if guard > 0:
@@ -233,23 +311,49 @@ class DeepseaVoice(Star):
 
         self._last_use = time.time()
         self._ensure_idle()
-        try:
-            async with self._lock:
-                path = await asyncio.wait_for(
-                    asyncio.to_thread(self._synthesize, jp[:400]),
-                    timeout=float(self._cfg("timeout", 120) or 120))
-        except asyncio.TimeoutError:
-            logger.warning("[深海之声] 合成超时")
-            return
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[深海之声] 合成失败：{exc}")
-            return
+        pieces = split_by_len(jp, int(self._cfg("chunk_chars", 180) or 180))
+        paths: list[str] = []
+        for piece in pieces:
+            try:
+                async with self._lock:
+                    path = await asyncio.wait_for(
+                        asyncio.to_thread(self._synthesize, piece),
+                        timeout=float(self._cfg("timeout", 120) or 120))
+            except asyncio.TimeoutError:
+                logger.warning("[深海之声] 合成超时")
+                continue
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[深海之声] 合成失败：{exc}")
+                continue
+            if path and os.path.exists(path):
+                paths.append(path)
 
-        if path and os.path.exists(path):
+        if paths:
             if zh:
                 plain.text = zh
-            chain.insert(0, Record(file=path))
+            for path in reversed(paths):
+                chain.insert(0, Record(file=path))
             result.chain = chain
+
+
+    async def _llm_translate(self, text: str) -> str:
+        """没写日语时，让 AstrBot 自己的模型翻一句——不用额外的本地模型。"""
+        try:
+            provider = self.context.get_using_provider()
+        except Exception:  # noqa: BLE001
+            provider = None
+        if provider is None:
+            return ""
+        prompt = ("把下面这句话翻译成自然的日语口语，只输出日语译文，不要解释、不要加引号：\n" + text)
+        try:
+            resp = await asyncio.wait_for(
+                provider.text_chat(prompt=prompt, contexts=[]),
+                timeout=float(self._cfg("translate_timeout", 45) or 45))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[深海之声] 翻译失败：{exc}")
+            return ""
+        content = getattr(resp, "completion_text", "") or ""
+        return content.strip().strip('"「」')
 
     @staticmethod
     def _available_mb() -> float:
