@@ -1,10 +1,13 @@
 {
   "enable": {"description":"启用配音","hint":"关掉后只发文字。","type":"bool","default":true},
-  "translate_url": {"description":"翻译服务地址","hint":"中文→日语，默认 127.0.0.1:8891。","type":"string","default":"http://127.0.0.1:8891/translate"},
-  "translate_timeout": {"description":"翻译超时（秒）","hint":"第一次加载模型约 20 秒，别设太小。","type":"int","default":90},
-  "tts_url": {"description":"语音服务地址","hint":"日语→mp3，默认 127.0.0.1:8890。","type":"string","default":"http://127.0.0.1:8890/tts"},
-  "tts_timeout": {"description":"合成超时（秒）","hint":"默认 120。","type":"int","default":120},
   "voicevox_dir": {"description":"VOICEVOX 资源目录","hint":"models/vvms、dict、onnxruntime 所在目录。","type":"string","default":"/root/AstrBot/data/voicevox"},
   "voicevox_model": {"description":"模型文件","hint":"0.vvm = 四国めたん/ずんだもん/春日部つむぎ/雨晴はう。","type":"string","default":"0.vvm"},
-  "voicevox_style": {"description":"声线 ID","hint":"ずんだもん ノーマル = 3，春日部つむぎ = 8。","type":"int","default":3}
+  "voicevox_style": {"description":"声线 ID","hint":"ずんだもん ノーマル = 3，春日部つむぎ = 8。","type":"int","default":3},
+  "speed": {"description":"语速","hint":"默认 1.05。","type":"float","default":1.05},
+  "intonation": {"description":"语调起伏","hint":"默认 1.0，喜欢更活泼调到 1.2。","type":"float","default":1.0},
+  "bitrate": {"description":"输出码率","hint":"默认 96k。","type":"string","default":"96k"},
+  "cache": {"description":"合成缓存","hint":"同文本只合成一次，最多留 80 条。","type":"bool","default":true},
+  "guard_memory_mb": {"description":"运存保护（MB）","hint":"可用运存低于此值跳过配音，默认 200。","type":"int","default":200},
+  "idle_unload_minutes": {"description":"闲置释放（分钟）","hint":"默认 15，闲置到点放掉模型省运存。0 不释放。","type":"int","default":15},
+  "timeout": {"description":"合成超时（秒）","hint":"默认 120。","type":"int","default":120}
 }

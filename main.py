@@ -1,163 +1,208 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""深海之声 · 重置版。
+"""深海之声 · 一体化版。
 
-一条路，三个服务，插件只做调度：
+插件内直接调 VOICEVOX 合成，没有外部 HTTP 服务——不会出现"服务掉了没声音"。
 
-    中文回复 ──► 翻译服务(8891) ──► 日语 ──► 语音服务(8890) ──► 语音条
-                                          └► 消息链：[语音][中文原文]
-
-设计上只保留必要的东西：
-  · 两个服务由插件拉起，AstrBot 重启自动恢复
-  · 翻译失败就不配音，只发文字，绝不阻断消息
-  · 插件不加载任何模型，运存全留给服务
+规则：回复写成「日语 + 中文」两段 → 日语合成语音，中文留在文字里。
 """
 from __future__ import annotations
 
 import asyncio
-import json
+import hashlib
+import io
 import os
 import re
 import shutil
-import socket
 import subprocess
-import sys
-import hmac
-import hashlib
+import tempfile
+import time
+import wave
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain, Record
 from astrbot.api.star import Context, Star
 
-KANA = re.compile(r"[\u3040-\u30ff]")
-QUOTE_LINE = (" > ", "```")
-SPEAK_FIX = (("本鲸", "私"),)
+try:
+    from voicevox_core.blocking import (
+        Onnxruntime, OpenJtalk, Synthesizer, VoiceModelFile,
+    )
+except ImportError:  # pragma: no cover
+    Onnxruntime = OpenJtalk = Synthesizer = VoiceModelFile = None
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.abspath(os.path.join(PLUGIN_DIR, "..", ".."))
-TRANSLATE_DIR = os.path.join(DATA_DIR, "translate")
-TTS_DIR = os.path.join(DATA_DIR, "tts_service")
+KANA = re.compile(r"[\u3040-\u30ff]")
+SENT_SPLIT = re.compile(r"(?<=[。！？!?])")
+# 句号 0.04 / 问叹分号 0.03；逗号不念不停
+GAP = {"。": 0.04, ".": 0.04, "？": 0.03, "?": 0.03, "！": 0.03, "!": 0.03, "；": 0.03, ";": 0.03}
 
 
 def has_kana(text: str) -> bool:
     return bool(KANA.search(text or ""))
 
 
-def strip_noise(text: str) -> str:
-    lines = [ln for ln in (text or "").split("\n") if not ln.lstrip().startswith(QUOTE_LINE)]
-    return "\n".join(lines).strip()
-
-
 class DeepseaVoice(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
         self.config = config or {}
-        self.cache_dir = os.path.join(PLUGIN_DIR, "cache")
+        self.plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        self.cache_dir = os.path.join(self.plugin_dir, "cache")
         os.makedirs(self.cache_dir, exist_ok=True)
-        # 服务跟着插件活：重启 AstrBot，两个服务自己回来
-        for fn in (self._ensure_tts,):
-            try:
-                import threading
-                threading.Thread(target=fn, daemon=True).start()
-            except Exception:  # noqa: BLE001
-                pass
+        self._synth = None
+        self._loaded = ""
+        self._lock = asyncio.Lock()
+        self._last_use = time.time()
+        self._idle: asyncio.Task | None = None
 
     # ---------------- 配置 ----------------
     def _cfg(self, key, default=None):
         value = self.config.get(key)
         return default if value in (None, "") else value
 
-    @staticmethod
-    def _port_open(port: int) -> bool:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.4):
-                return True
-        except OSError:
+    def _base(self) -> str:
+        return str(self._cfg("voicevox_dir", "/root/AstrBot/data/voicevox"))
+
+    def _ready(self) -> bool:
+        if Synthesizer is None:
             return False
+        base = self._base()
+        return all(os.path.exists(p) for p in (
+            os.path.join(base, "dict", "open_jtalk_dic_utf_8-1.11"),
+            os.path.join(base, "models", "vvms", str(self._cfg("voicevox_model", "0.vvm"))),
+            os.path.join(base, "onnxruntime", "lib", "libvoicevox_onnxruntime.so.1.17.3"),
+        ))
 
-    # ---------------- 服务生命周期 ----------------
-    def _ensure_translate(self) -> None:
-        if self._port_open(8891):
+    # ---------------- 引擎 ----------------
+    def _engine(self) -> Synthesizer:
+        if self._synth is not None:
+            return self._synth
+        base = self._base()
+        ort = Onnxruntime.load_once(
+            filename=os.path.join(base, "onnxruntime", "lib", "libvoicevox_onnxruntime.so.1.17.3"))
+        ojt = OpenJtalk(os.path.join(base, "dict", "open_jtalk_dic_utf_8-1.11"))
+        self._synth = Synthesizer(ort, ojt)
+        return self._synth
+
+    def _load_model(self) -> None:
+        path = os.path.join(self._base(), "models", "vvms", str(self._cfg("voicevox_model", "0.vvm")))
+        if self._loaded == path:
             return
-        entry = os.path.join(TRANSLATE_DIR, "server.mjs")
-        node = shutil.which("node")
-        if not (os.path.exists(entry) and node):
-            logger.warning("[深海之声] 翻译服务缺 node 或 server.mjs")
-            return
-        env = dict(os.environ, TRANSLATE_HOST="127.0.0.1", TRANSLATE_PORT="8891")
-        try:
-            subprocess.Popen([node, "--max-old-space-size=1536", entry],
-                             cwd=TRANSLATE_DIR, env=env,
-                             stdout=open("/tmp/translate.log", "a"),
-                             stderr=subprocess.STDOUT, start_new_session=True)
-            logger.info("[深海之声] 翻译服务已拉起")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[深海之声] 翻译服务启动失败：{exc}")
+        style = int(self._cfg("voicevox_style", 3))
+        self._engine().load_voice_model(VoiceModelFile.open(path))
+        self._loaded = path
+        logger.info(f"[深海之声] 模型已加载 style={style}")
 
-    def _ensure_tts(self) -> None:
-        if self._port_open(8890):
-            return
-        entry = os.path.join(TTS_DIR, "server.py")
-        if not os.path.exists(entry):
-            logger.warning("[深海之声] 语音服务缺 server.py")
-            return
-        env = dict(os.environ, TTS_HOST="127.0.0.1",
-                   VOICEVOX_DIR=str(self._cfg("voicevox_dir", "/root/AstrBot/data/voicevox")),
-                   VOICEVOX_MODEL=str(self._cfg("voicevox_model", "0.vvm")),
-                   VOICEVOX_STYLE=str(self._cfg("voicevox_style", 3)),
-                   TTS_GAP="0.04")
-        try:
-            subprocess.Popen([sys.executable, entry], cwd=TTS_DIR, env=env,
-                             stdout=open("/tmp/tts_service.log", "a"),
-                             stderr=subprocess.STDOUT, start_new_session=True)
-            logger.info("[深海之声] 语音服务已拉起")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[深海之声] 语音服务启动失败：{exc}")
+    def _synthesize(self, text: str) -> str:
+        """日语 → mp3 路径。按句子切分，自己插静音。"""
+        style = int(self._cfg("voicevox_style", 3))
+        key = hashlib.sha1(f"{text}|{style}".encode()).hexdigest()[:16]
+        out = os.path.join(self.cache_dir, f"{key}.mp3")
+        if bool(self._cfg("cache", True)) and os.path.exists(out):
+            return out
 
-    # ---------------- 调服务 ----------------
-    def _post(self, url: str, payload: dict, timeout: float, raw: bool = False):
-        import urllib.request
-        body = json.dumps(payload, ensure_ascii=False).encode()
-        req = urllib.request.Request(url, data=body,
-                                     headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
-        return data if raw else json.loads(data.decode())
+        self._load_model()
+        e = self._engine()
+        segs = [x for x in SENT_SPLIT.split(text) if x.strip()] or [text]
 
-    def _translate(self, text: str) -> str:
-        for a, b in SPEAK_FIX:
-            text = text.replace(a, b)
-        try:
-            data = self._post(str(self._cfg("translate_url", "http://127.0.0.1:8891/translate")),
-                              {"text": text[:400]},
-                              float(self._cfg("translate_timeout", 90)))
-            return str(data.get("ja") or "").strip()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[深海之声] 翻译失败：{exc}")
-            return ""
+        chunks: list[tuple[bytes, float]] = []
+        for seg in segs:
+            try:
+                q = e.create_audio_query(seg, style)
+            except Exception:            # 单句解析不了就跳过
+                continue
+            q.speed_scale = float(self._cfg("speed", 1.05))
+            q.intonation_scale = float(self._cfg("intonation", 1.0))
+            q.pre_phoneme_length = 0.04
+            q.post_phoneme_length = 0.06
+            try:
+                chunks.append((e.synthesis(q, style), GAP.get(seg.rstrip()[-1], 0.04)))
+            except Exception:            # noqa: BLE001
+                continue
+        if not chunks:
+            raise RuntimeError("没有可念的内容")
 
-    def _tts(self, text: str) -> str:
+        wav = self._mix(chunks)
+        return self._to_mp3(wav, out)
+
+    @staticmethod
+    def _mix(chunks: list[tuple[bytes, float]]) -> bytes:
+        pcm: list[bytes] = []
+        gaps: list[bytes] = []
+        rate, width = 24000, 2
+        for blob, gap in chunks:
+            with wave.open(io.BytesIO(blob)) as fh:
+                rate, width = fh.getframerate(), fh.getsampwidth()
+                pcm.append(fh.readframes(fh.getnframes()))
+            gaps.append(b"\x00" * (int(rate * gap) * width))
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as fh:
+            fh.setnchannels(1)
+            fh.setsampwidth(width)
+            fh.setframerate(rate)
+            for i, data in enumerate(pcm):
+                fh.writeframes(data)
+                if i < len(gaps):
+                    fh.writeframes(gaps[i])
+        return buf.getvalue()
+
+    def _to_mp3(self, wav_bytes: bytes, out: str) -> str:
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("缺 ffmpeg")
+        src = os.path.join(tempfile.gettempdir(), f"dsv_{os.getpid()}_{os.urandom(3).hex()}.wav")
+        with open(src, "wb") as fh:
+            fh.write(wav_bytes)
         try:
-            audio = self._post(str(self._cfg("tts_url", "http://127.0.0.1:8890/tts")),
-                               {"text": text[:600]},
-                               float(self._cfg("tts_timeout", 120)), raw=True)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[深海之声] 合成失败：{exc}")
-            return ""
-        if not audio:
-            return ""
-        name = hashlib.sha1(f"{text}".encode()).hexdigest()[:16] + ".mp3"
-        path = os.path.join(self.cache_dir, name)
-        with open(path, "wb") as fh:
-            fh.write(audio)
-        os.chmod(path, 0o644)
-        return path
+            subprocess.run(
+                [ffmpeg, "-y", "-loglevel", "error", "-i", src,
+                 "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,volume=0dB,alimiter=limit=0.95",
+                 "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame",
+                 "-b:a", str(self._cfg("bitrate", "96k")), out],
+                check=True, timeout=180)
+        finally:
+            try:
+                os.remove(src)
+            except OSError:
+                pass
+        os.chmod(out, 0o644)
+        self._clean_cache()
+        return out
+
+    def _clean_cache(self, keep: int = 80) -> None:
+        try:
+            files = [os.path.join(self.cache_dir, f) for f in os.listdir(self.cache_dir)]
+            files = [f for f in files if os.path.isfile(f)]
+            if len(files) > keep:
+                files.sort(key=os.path.getmtime)
+                for path in files[: len(files) - keep]:
+                    os.remove(path)
+        except OSError:
+            pass
+
+    # ---------------- 空闲释放 ----------------
+    def _ensure_idle(self) -> None:
+        if self._idle is None or self._idle.done():
+            try:
+                self._idle = asyncio.create_task(self._idle_loop())
+            except RuntimeError:
+                self._idle = None
+
+    async def _idle_loop(self) -> None:
+        while True:
+            minutes = float(self._cfg("idle_unload_minutes", 15) or 0)
+            await asyncio.sleep(60)
+            if minutes <= 0 or self._synth is None or self._lock.locked():
+                continue
+            if time.time() - self._last_use < minutes * 60:
+                continue
+            self._synth = None
+            self._loaded = ""
+            logger.info(f"[深海之声] 闲置 {minutes:.0f} 分钟，释放模型")
 
     # ---------------- 钩子 ----------------
     @filter.on_decorating_result()
     async def decorate(self, event: AstrMessageEvent):
-        if not bool(self._cfg("enable", True)):
+        if not bool(self._cfg("enable", True)) or not self._ready():
             return
         result = event.get_result()
         chain = getattr(result, "chain", None) if result else None
@@ -172,25 +217,54 @@ class DeepseaVoice(Star):
         plain = next((c for c in chain if isinstance(c, Plain) and c.text), None)
         if plain is None:
             return
-        original = strip_noise(plain.text)
-        if not original:
+        raw = plain.text or ""
+        segs = [x for x in re.split(r"(?<=[。！？!?\n])", raw) if x.strip()]
+        jp = "".join(x for x in segs if has_kana(x)).strip()
+        zh = "".join(x for x in segs if not has_kana(x)).strip()
+        if not jp:
+            return                      # 没有日语，就只发文字
+
+        guard = int(self._cfg("guard_memory_mb", 200) or 0)
+        if guard > 0:
+            avail = self._available_mb()
+            if 0 <= avail < guard:
+                logger.warning(f"[深海之声] 可用运存 {avail:.0f}MB < {guard}MB，跳过配音")
+                return
+
+        self._last_use = time.time()
+        self._ensure_idle()
+        try:
+            async with self._lock:
+                path = await asyncio.wait_for(
+                    asyncio.to_thread(self._synthesize, jp[:400]),
+                    timeout=float(self._cfg("timeout", 120) or 120))
+        except asyncio.TimeoutError:
+            logger.warning("[深海之声] 合成超时")
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[深海之声] 合成失败：{exc}")
             return
 
-        # 回复写成「日语 + 中文翻译」：日语那句念出来，文字只留中文
-        if not has_kana(original):
-            return
-        segs = re.split(r"(?<=[。！？!?\n])", original)
-        jp_text = "".join(x for x in segs if has_kana(x)).strip()
-        zh_text = "".join(x for x in segs if x.strip() and not has_kana(x)).strip()
-        if not jp_text:
-            return
-        voice_text = jp_text
-        display = zh_text or original
+        if path and os.path.exists(path):
+            if zh:
+                plain.text = zh
+            chain.insert(0, Record(file=path))
+            result.chain = chain
 
-        path = await asyncio.to_thread(self._tts, voice_text)
-        if not path:
-            return
+    @staticmethod
+    def _available_mb() -> float:
+        try:
+            with open("/proc/meminfo", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) / 1024
+        except (OSError, ValueError, IndexError):
+            pass
+        return -1.0
 
-        plain.text = display            # 文字保留中文（或日语原文）
-        chain.insert(0, Record(file=path))
-        result.chain = chain
+    async def terminate(self):
+        if self._idle is not None:
+            self._idle.cancel()
+            self._idle = None
+        self._synth = None
+        logger.info("[深海之声] 收声。")
