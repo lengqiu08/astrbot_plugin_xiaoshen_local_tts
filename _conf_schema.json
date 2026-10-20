@@ -1,44 +1,10 @@
 {
-  "enable": {
-    "description": "启用配音",
-    "hint": "关掉后只发文字。",
-    "type": "bool",
-    "default": true
-  },
-  "service_url": {
-    "description": "TTS 服务地址",
-    "hint": "默认 http://127.0.0.1:8890/tts，对应 data/tts_service/server.py。",
-    "type": "string",
-    "default": "http://127.0.0.1:8890/tts"
-  },
-  "max_chars": {
-    "description": "单条上限（字）",
-    "hint": "单条上限，默认 300 字（约 75 秒语音）。太长没人听完。",
-    "type": "int",
-    "default": 300
-  },
-  "timeout": {
-    "description": "请求超时（秒）",
-    "hint": "默认 120 秒，超过就当超时，只发文字。",
-    "type": "int",
-    "default": 120
-  },
-  "chinese_too": {
-    "description": "中文也用日语引擎念",
-    "hint": "开：中文回复配上日语嗓音（汉字音读，日式中文）。关：只有日语才配音。",
-    "type": "bool",
-    "default": false
-  },
-  "translate_url": {
-    "description": "翻译服务地址",
-    "hint": "中文先送去这里翻成日语，再合成语音。填空则不翻译。",
-    "type": "string",
-    "default": "http://127.0.0.1:8891/translate"
-  },
-  "translate_timeout": {
-    "description": "翻译超时（秒）",
-    "hint": "默认 90。第一次加载模型会慢。",
-    "type": "int",
-    "default": 90
-  }
+  "enable": {"description":"启用配音","hint":"关掉后只发文字。","type":"bool","default":true},
+  "translate_url": {"description":"翻译服务地址","hint":"中文→日语，默认 127.0.0.1:8891。","type":"string","default":"http://127.0.0.1:8891/translate"},
+  "translate_timeout": {"description":"翻译超时（秒）","hint":"第一次加载模型约 20 秒，别设太小。","type":"int","default":90},
+  "tts_url": {"description":"语音服务地址","hint":"日语→mp3，默认 127.0.0.1:8890。","type":"string","default":"http://127.0.0.1:8890/tts"},
+  "tts_timeout": {"description":"合成超时（秒）","hint":"默认 120。","type":"int","default":120},
+  "voicevox_dir": {"description":"VOICEVOX 资源目录","hint":"models/vvms、dict、onnxruntime 所在目录。","type":"string","default":"/root/AstrBot/data/voicevox"},
+  "voicevox_model": {"description":"模型文件","hint":"0.vvm = 四国めたん/ずんだもん/春日部つむぎ/雨晴はう。","type":"string","default":"0.vvm"},
+  "voicevox_style": {"description":"声线 ID","hint":"ずんだもん ノーマル = 3，春日部つむぎ = 8。","type":"int","default":3}
 }
